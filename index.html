@@ -41,17 +41,18 @@ select.cell{background:#fff}.builder{display:grid;grid-template-columns:2fr 1fr 
 </div>
 
 <div class="card">
-<div class="tablewrap"><table><thead><tr><th>ID</th><th>Task Name</th><th>Duration (days)</th><th>Predecessors</th><th class="costCol">Cost ($)</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>ID</th><th>Task Name</th><th>Duration (days)</th><th>Predecessors</th><th>Relationships</th><th class="costCol">Cost ($)</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div id="err" class="error"></div>
-<div class="tools"><button onclick="document.getElementById('csv').click()">Import CSV</button><input id="csv" type="file" accept=".csv" hidden onchange="importCSV(this.files[0])"><button onclick="exportCSV()">Export CSV</button><button onclick="loadSample()">Load Sample</button><button onclick="window.print()">Print / Save PDF Report</button></div>
+<div class="tools"><button onclick="document.getElementById('csv').click()">Import CSV</button><input id="csv" type="file" accept=".csv" hidden onchange="importCSV(this.files[0])"><button onclick="exportCSV()">Export CSV</button><button onclick="loadSample()">Load Sample</button><button onclick="tasks=makeDefaultProject();drawRows();render()">Random A–G</button><button onclick="window.print()">Print / Save PDF Report</button></div>
 <div class="builder">
 <select id="bTask" class="cell"></select>
 <select id="bPred" class="cell"></select>
 <div style="display:flex;gap:6px"><select id="bRel" class="cell"><option>FS</option><option>SS</option><option>FF</option><option>SF</option></select><input id="bLag" class="cell" type="number" step="any" value="0" title="Lag"></div>
 <button onclick="addRelationship()">Add Relationship</button>
 </div>
+<p class="note"><b>Smart CSV Import:</b> repeated activity rows are automatically merged. Predecessors and Relationships are displayed in separate columns for clarity. Matching is positional: <b>C, D</b> with <b>SS+2, FS</b> means C→SS+2 and D→FS.</p>
 <p class="note">Relationship Builder: choose a task, its predecessor, relationship type and lag. The predecessor field is filled automatically.</p>
-<p class="note">Predecessor examples: <b>A</b>, <b>A FS+2</b>, <b>A SS</b>, <b>B SS+1, E</b>, <b>C FF+3</b>, <b>C SF+3</b>. Plain predecessors default to FS+0.</p>
+<p class="note">Example: Predecessors <b>A, B, C</b> and Relationships <b>FS, SS+1, FF+3</b>. If a relationship is left blank/missing, it defaults to <b>FS</b>.</p>
 </div>
 
 <div class="card">
@@ -72,7 +73,24 @@ const sample=[
 {name:"UI/UX Design",dur:7,pred:"Research",cost:4000},{name:"Development",dur:20,pred:"System Design",cost:2000},
 {name:"Code Review",dur:4,pred:"UI/UX Design",cost:3000},{name:"Testing (QA)",dur:15,pred:"UI/UX Design",cost:2500},
 {name:"Deployment",dur:5,pred:"Development, Code Review",cost:4000},{name:"Maintenance",dur:10,pred:"Testing (QA), Deployment",cost:2000}];
-function loadSample(){tasks=structuredClone(sample);drawRows();render()}
+function makeDefaultProject(){
+  const rnd=()=>2+Math.floor(Math.random()*7); // random 2–8 day durations
+
+  // Simple practice network:
+  // A starts; B and C follow A; D follows B; E follows C;
+  // F follows D; G follows E and F.
+  // Relationships are intentionally omitted because blank = FS with 0 lag.
+  return [
+    {name:"A",dur:rnd(),pred:"",cost:0},
+    {name:"B",dur:rnd(),pred:"A",cost:0},
+    {name:"C",dur:rnd(),pred:"A",cost:0},
+    {name:"D",dur:rnd(),pred:"B",cost:0},
+    {name:"E",dur:rnd(),pred:"C",cost:0},
+    {name:"F",dur:rnd(),pred:"D",cost:0},
+    {name:"G",dur:rnd(),pred:"E, F",cost:0}
+  ];
+}
+function loadSample(){tasks=makeDefaultProject();drawRows();render();}
 function resetProject(){
   if(!confirm("Clear all project and task data?")) return;
   tasks=[{name:"",dur:"",pred:"",cost:""}];
@@ -85,10 +103,50 @@ function resetProject(){
   },0);
 }
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function splitPredRel(text){
+ let names=[],rels=[];
+ if(!String(text||"").trim())return{preds:"",rels:""};
+ String(text).split(",").map(x=>x.trim()).filter(Boolean).forEach(raw=>{
+   let m=raw.match(/^(.*?)(?:\s+(FS|SS|FF|SF)(?:\s*([+-])\s*(\d+(?:\.\d+)?))?)$/i);
+   if(m){
+     names.push(m[1].trim());
+     let lag=m[4]?Number(m[4])*(m[3]==="-"?-1:1):0;
+     let rel=m[2].toUpperCase();
+     // FS with zero lag is the default, so display it as blank.
+     rels.push(rel==="FS" && lag===0 ? "" : rel+(lag?((lag>0?"+":"")+lag):""));
+   } else {
+     names.push(raw);
+     rels.push("");
+   }
+ });
+ // If ALL relationships are default FS+0, keep the entire field blank.
+ // Only preserve positional blanks when at least one relationship is non-default.
+ const hasExplicit=rels.some(r=>String(r).trim()!=="");
+ return{preds:names.join(", "),rels:hasExplicit?rels.join(", "):""};
+}
+function editPredRel(i,which,value){
+ let cur=splitPredRel(tasks[i].pred);
+ let preds=(which==="preds"?value:cur.preds).split(",").map(x=>x.trim()).filter(Boolean);
+ let rels=(which==="rels"?value:cur.rels).split(",").map(x=>x.trim()).filter(Boolean);
+
+ // If the relationship field is cleared, every listed predecessor defaults to FS+0.
+ // Missing individual relationship entries also default to FS+0.
+ if(which==="rels" && !value.trim()) rels=[];
+ tasks[i].pred=preds.map((p,k)=>{
+   let rel=(rels[k]||"").trim().toUpperCase();
+   // Blank relationship means the predecessor is stored without a suffix.
+   // parsePred() already interprets a plain predecessor as FS with 0 lag.
+   if(!rel || rel==="FS" || rel==="FS+0" || rel==="FS-0") return p;
+   if(!/^(FS|SS|FF|SF)(?:[+-]\d+(?:\.\d+)?)?$/.test(rel)) return p;
+   return p+" "+rel;
+ }).join(", ");
+ render();
+}
 function drawRows(){const b=document.getElementById("rows");b.innerHTML=tasks.map((t,i)=>`<tr><td>${i+1}</td>
 <td><input class="cell" value="${esc(t.name)}" oninput="edit(${i},'name',this.value)"></td>
 <td><input class="cell dur" type="number" min="0" step="any" value="${t.dur}" oninput="edit(${i},'dur',this.value)"></td>
-<td><input class="cell" value="${esc(t.pred)}" placeholder="e.g., Design FS+2" oninput="edit(${i},'pred',this.value)"></td>
+<td><input class="cell" value="${esc(splitPredRel(t.pred).preds)}" placeholder="e.g., C, D" oninput="editPredRel(${i},'preds',this.value)"></td>
+<td><input class="cell" value="${esc(splitPredRel(t.pred).rels)}" placeholder="Default: FS (0 lag)" oninput="editPredRel(${i},'rels',this.value)"></td>
 <td class="costCol"><input class="cell cost" type="number" min="0" step="any" value="${t.cost||0}" oninput="edit(${i},'cost',this.value)"></td>
 <td><button class="del" onclick="removeTask(${i})">⌫</button></td></tr>`).join("");toggleCostCols()}
 function addTask(){tasks.push({name:"Task "+(tasks.length+1),dur:1,pred:"",cost:0});drawRows();render()}
@@ -147,7 +205,7 @@ function addRelationship(){
  if(!tasks[ti]||!tasks[pi])return;if(ti===pi){alert("A task cannot be its own predecessor.");return}
  let pn=tasks[pi].name.trim();if(!pn){alert("Give the predecessor task a name first.");return}
  let rel=document.getElementById("bRel").value,lag=+document.getElementById("bLag").value||0;
- let token=pn+" "+rel+(lag?(lag>0?"+":"")+lag:"");
+ let token=(rel==="FS" && lag===0) ? pn : pn+" "+rel+(lag?(lag>0?"+":"")+lag:"");
  tasks[ti].pred=tasks[ti].pred.trim()?tasks[ti].pred+", "+token:token;drawRows();render()
 }
 function analyzeExtra(c){
@@ -185,8 +243,8 @@ function renderResults(c){
  let paths=criticalPaths(c);document.getElementById("mDuration").textContent=fmt(c.T)+" days";document.getElementById("mCritCount").textContent=c.crit.filter(Boolean).length;
  document.getElementById("mCritical").textContent=paths.length?paths.map(p=>p.map(i=>tasks[i].name).join(" → ")).join(" | "):"—";
  let warnings=[];let roots=c.preds.map((p,i)=>!p.length?i:-1).filter(i=>i>=0),ends=c.succ.map((s,i)=>!s.length?i:-1).filter(i=>i>=0);
- if(roots.length>1)warnings.push(`Multiple starting activities: ${roots.map(i=>tasks[i].name).join(", ")}.`);
- if(ends.length>1)warnings.push(`Multiple terminal activities: ${ends.map(i=>tasks[i].name).join(", ")}.`);
+ if(roots.length>1)warnings.push(`START milestone connects ${roots.length} starting activities: ${roots.map(i=>tasks[i].name).join(", ")}.`);
+ if(ends.length>1)warnings.push(`END milestone collects ${ends.length} terminal activities: ${ends.map(i=>tasks[i].name).join(", ")}.`);
  let box=document.getElementById("logicWarnings");box.style.display=warnings.length?"block":"none";box.textContent=warnings.join(" ");
  window._lastCalc=c;window._lastExtra=x;
 }
@@ -206,13 +264,208 @@ function render(){
 function fmt(x){return Math.abs(x-Math.round(x))<1e-8?Math.round(x):Math.round(x*100)/100}
 function drawNetwork(c){
  const n=tasks.length;if(!n){document.getElementById("network").innerHTML="";return}
- let level=Array(n).fill(0);for(let i of c.order)for(let p of c.preds[i])level[i]=Math.max(level[i],level[p.j]+1);
- let groups={};level.forEach((l,i)=>(groups[l]??=[]).push(i));let maxL=Math.max(...level),W=Math.max(1000,(maxL+1)*260),maxRows=Math.max(...Object.values(groups).map(x=>x.length)),H=Math.max(260,maxRows*155+70),pos={};
- for(let l=0;l<=maxL;l++){let g=groups[l]||[];g.forEach((i,r)=>pos[i]={x:40+l*250,y:35+(r+1)*(H-80)/(g.length+1)-55})}
- let defs=`<defs><marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#555"/></marker><marker id="arrc" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#ca5b57"/></marker></defs>`;
- let edges="";for(let i=0;i<n;i++)for(let p of c.preds[i]){let a=pos[p.j],b=pos[i],critical=c.crit[p.j]&&c.crit[i];let col=critical?"#ca5b57":"#555";edges+=`<line x1="${a.x+190}" y1="${a.y+52}" x2="${b.x}" y2="${b.y+52}" stroke="${col}" stroke-width="${critical?3:2}" marker-end="url(#${critical?"arrc":"arr"})"/>`;if(document.getElementById("showRel").checked)edges+=`<text x="${(a.x+190+b.x)/2}" y="${(a.y+b.y)/2+45}" font-size="13" fill="#555">${p.label}</text>`}
- let nodes="";for(let i=0;i<n;i++){let p=pos[i],cr=c.crit[i],stroke=cr?"#ca5b57":"#5b7fda";nodes+=`<g><rect x="${p.x}" y="${p.y}" width="190" height="105" rx="6" fill="#fff" stroke="${stroke}" stroke-width="3"/><text x="${p.x+95}" y="${p.y+21}" text-anchor="middle" font-weight="700" font-size="15">${esc(tasks[i].name)}</text><text x="${p.x+95}" y="${p.y+40}" text-anchor="middle" font-size="13">Duration: ${fmt(tasks[i].dur)}</text><text x="${p.x+12}" y="${p.y+61}" font-size="13">ES: ${fmt(c.es[i])}</text><text x="${p.x+112}" y="${p.y+61}" font-size="13">EF: ${fmt(c.ef[i])}</text><text x="${p.x+12}" y="${p.y+81}" font-size="13">LS: ${fmt(c.ls[i])}</text><text x="${p.x+112}" y="${p.y+81}" font-size="13">LF: ${fmt(c.lf[i])}</text>${document.getElementById("showFloat").checked?`<text x="${p.x+95}" y="${p.y+99}" text-anchor="middle" font-size="13" fill="${cr?"#ca5b57":"#45a56d"}">Float: ${fmt(c.tf[i])}</text>`:""}</g>`}
- document.getElementById("network").innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${edges}${nodes}</svg>`
+
+ // Rank activities from a single START node. START connects to every root activity;
+ // every terminal activity connects to a single END node.
+ let roots=[],terminals=[];
+ for(let i=0;i<n;i++){if(!c.preds[i].length)roots.push(i);if(!c.succ[i].length)terminals.push(i)}
+ const showStart=roots.length>1;
+ const showEnd=terminals.length>1;
+ let level=Array(n).fill(1);
+ for(let i of c.order)for(let p of c.preds[i])level[i]=Math.max(level[i],level[p.j]+1);
+ let maxActLevel=Math.max(1,...level),endLevel=maxActLevel+1;
+
+ let groups={};
+ level.forEach((l,i)=>(groups[l]??=[]).push(i));
+ let maxRows=Math.max(1,...Object.values(groups).map(g=>g.length));
+ const nodeW=190,nodeH=112,colGap=285,rowGap=155,marginX=55,marginY=55;
+ let W=Math.max(1150,marginX*2+(endLevel+1)*colGap);
+ let H=Math.max(320,marginY*2+maxRows*rowGap);
+ let pos={};
+
+ // START and END are vertically centered.
+ pos.START={x:marginX,y:H/2-42};
+ pos.END={x:marginX+endLevel*colGap,y:H/2-42};
+
+ // SMART UNTANGLING:
+ // Order each logical column by the average vertical position of its predecessors.
+ // This automatically swaps activities (for example G/H) when doing so shortens
+ // relationship lines and reduces crossings. Activity IDs/names and logic never change.
+ for(let l=1;l<=maxActLevel;l++){
+   let g=(groups[l]||[]).slice();
+
+   if(l>1 && g.length>1){
+     g.sort((a,b)=>{
+       const score = i => {
+         const ps=c.preds[i]||[];
+         if(!ps.length) return Number.POSITIVE_INFINITY;
+         const ys=ps.map(p=>pos[p.j]).filter(Boolean).map(q=>q.y+nodeH/2);
+         return ys.length ? ys.reduce((x,y)=>x+y,0)/ys.length : Number.POSITIVE_INFINITY;
+       };
+       let sa=score(a), sb=score(b);
+       if(sa!==sb) return sa-sb;
+
+       // Tie-breaker: activities with more shared/downstream logic stay nearer the centre.
+       let da=(c.succ[a]||[]).length, db=(c.succ[b]||[]).length;
+       if(da!==db) return db-da;
+       return a-b;
+     });
+     groups[l]=g;
+   }
+
+   let block=(g.length-1)*rowGap;
+   g.forEach((i,r)=>pos[i]={x:marginX+l*colGap,y:H/2-nodeH/2-block/2+r*rowGap});
+ }
+
+ // One backward refinement pass uses successor positions to improve columns where
+ // predecessor-only ordering is tied. This preserves logical ranks while reducing crossings.
+ for(let l=maxActLevel-1;l>=1;l--){
+   let g=(groups[l]||[]).slice();
+   if(g.length<2) continue;
+   let oldOrder=new Map(g.map((id,k)=>[id,k]));
+   g.sort((a,b)=>{
+     const score = i => {
+       const ss=c.succ[i]||[];
+       const ys=ss.map(e=>pos[e.i]).filter(Boolean).map(q=>q.y+nodeH/2);
+       return ys.length ? ys.reduce((x,y)=>x+y,0)/ys.length : (pos[i]?.y||0)+nodeH/2;
+     };
+     let sa=score(a), sb=score(b);
+     return sa===sb ? oldOrder.get(a)-oldOrder.get(b) : sa-sb;
+   });
+   groups[l]=g;
+   let block=(g.length-1)*rowGap;
+   g.forEach((i,r)=>pos[i]={x:marginX+l*colGap,y:H/2-nodeH/2-block/2+r*rowGap});
+ }
+
+ let defs=`<defs>
+ <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,7 L9,3.5 z" fill="#555"/></marker>
+ <marker id="arrc" markerWidth="10" markerHeight="10" refX="9" refY="3.5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,7 L9,3.5 z" fill="#ca5b57"/></marker>
+ </defs>`;
+
+ // Orthogonal elbow routing: arrows terminate exactly at the left edge of boxes.
+ function route(a,b,critical,label,outIndex=0,outCount=1,inIndex=0,inCount=1,skipLane=0){
+   const aW=a.special?95:nodeW, aH=a.special?84:nodeH;
+   const bH=b.special?84:nodeH;
+   const portY=(top,h,idx,count)=> top + h*((idx+1)/(count+1));
+   let x1=a.x+aW, y1=portY(a.y,aH,outIndex,outCount);
+   let x2=b.x, y2=portY(b.y,bH,inIndex,inCount);
+   let col=critical?"#ca5b57":"#555";
+
+   // If an edge skips one or more activity columns, route it underneath the
+   // intermediate nodes instead of allowing a vertical segment to pass through them.
+   let sourceCol=Math.round((a.x-marginX)/colGap);
+   let targetCol=Math.round((b.x-marginX)/colGap);
+   let skips=targetCol-sourceCol>1;
+   let d, labelX, labelY;
+
+   if(skips && !a.special && !b.special){
+     let clearY=H-28-skipLane*16;
+     let leaveX=x1+24+outIndex*8;
+     let enterX=x2-24-inIndex*8;
+     d=`M ${x1} ${y1} H ${leaveX} V ${clearY} H ${enterX} V ${y2} H ${x2}`;
+     labelX=(leaveX+enterX)/2; labelY=clearY-8;
+   }else{
+     // Adjacent-column relationship: use a dedicated elbow lane.
+     let span=Math.max(70,x2-x1);
+     let base=x1+span*0.48;
+     let laneOffset=(outIndex-(outCount-1)/2)*22 + (inIndex-(inCount-1)/2)*8;
+     let mid=Math.max(x1+24,Math.min(x2-24,base+laneOffset));
+     d=`M ${x1} ${y1} H ${mid} V ${y2} H ${x2}`;
+     labelX=mid; labelY=(Math.abs(y2-y1)<8)?y1-10:(y1+y2)/2-8;
+   }
+
+   let z=`<path d="${d}" fill="none" stroke="${col}" stroke-width="${critical?3:2}" stroke-linejoin="round" stroke-linecap="square" marker-end="url(#${critical?"arrc":"arr"})"/>`;
+   if(label && document.getElementById("showRel").checked){
+     z+=`<rect x="${labelX-27}" y="${labelY-11}" width="54" height="19" rx="4" fill="white" opacity=".96"/><text x="${labelX}" y="${labelY+3}" text-anchor="middle" font-size="12" font-weight="700" fill="#555">${esc(label)}</text>`;
+   }
+   return z;
+ }
+
+ // START/END use smaller milestone boxes and therefore their own port dimensions.
+ pos.START.special=pos.END.special=true;
+
+ // Build deterministic incoming/outgoing edge lists so every relationship gets
+ // its own source port and its own target port.
+ let incoming=Array.from({length:n},()=>[]);
+ let outgoing=Array.from({length:n},()=>[]);
+ for(let u=0;u<n;u++) c.succ[u].forEach(e=>{
+   let edge={u,v:e.i,label:e.label,rel:e.rel,lag:e.lag};
+   outgoing[u].push(edge); incoming[e.i].push(edge);
+ });
+ // Sort ports top-to-bottom according to the opposite node position.
+ for(let u=0;u<n;u++) outgoing[u].sort((x,y)=>pos[x.v].y-pos[y.v].y);
+ for(let v=0;v<n;v++) incoming[v].sort((x,y)=>pos[x.u].y-pos[y.u].y);
+
+ let edges="",skipLaneCounter=0;
+ if(showStart) roots.forEach((i,k)=>{
+   edges+=route(pos.START,pos[i],c.crit[i],"",k,roots.length,0,1,0);
+ });
+ for(let u=0;u<n;u++){
+   outgoing[u].forEach((e,oi)=>{
+     let ii=incoming[e.v].findIndex(x=>x.u===u && x.v===e.v && x.label===e.label);
+     let critical=c.crit[u]&&c.crit[e.v];
+     let sourceCol=Math.round((pos[u].x-marginX)/colGap);
+     let targetCol=Math.round((pos[e.v].x-marginX)/colGap);
+     let lane=(targetCol-sourceCol>1)?skipLaneCounter++:0;
+     edges+=route(pos[u],pos[e.v],critical,e.label,oi,outgoing[u].length,Math.max(0,ii),incoming[e.v].length,lane);
+   });
+ }
+ // Terminal activities connect to END using a dedicated clean route.
+ // Do not reuse the normal skip-column router here, because that can make a
+ // terminal line appear to travel behind another terminal activity.
+ if(showEnd) terminals.forEach((i,k)=>{
+   const a=pos[i], b=pos.END;
+   const x1=a.x+nodeW;
+   const y1=a.y+nodeH/2;
+   const x2=b.x;
+   const y2=b.y+84*((k+1)/(terminals.length+1));
+   const critical=c.crit[i];
+   const col=critical?"#ca5b57":"#555";
+
+   // Leave the activity horizontally. If END is at a different height, make
+   // one elbow only in the clear space immediately before END.
+   const elbowX=x2-62-(terminals.length-1-k)*14;
+   const d=Math.abs(y1-y2)<5
+     ? `M ${x1} ${y1} H ${x2}`
+     : `M ${x1} ${y1} H ${elbowX} V ${y2} H ${x2}`;
+
+   edges+=`<path d="${d}" fill="none" stroke="${col}" stroke-width="${critical?3:2}"
+     stroke-linejoin="round" stroke-linecap="square"
+     marker-end="url(#${critical?"arrc":"arr"})"/>`;
+ });
+
+ pos.START.special=pos.END.special=true;
+
+ // Activity nodes use a scheduling-box layout similar to hand-drawn PDM:
+ // ES | Activity | EF on top; LS | Duration | LF below; float shown underneath.
+ let nodes="";
+ for(let i=0;i<n;i++){
+   let p=pos[i],cr=c.crit[i],stroke=cr?"#ca5b57":"#5b7fda";
+   nodes+=`<g>
+   <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="5" fill="#fff" stroke="${stroke}" stroke-width="${cr?3.2:2.5}"/>
+   <line x1="${p.x}" y1="${p.y+55}" x2="${p.x+nodeW}" y2="${p.y+55}" stroke="#cfd3da"/>
+   <line x1="${p.x+48}" y1="${p.y}" x2="${p.x+48}" y2="${p.y+nodeH}" stroke="#cfd3da"/>
+   <line x1="${p.x+142}" y1="${p.y}" x2="${p.x+142}" y2="${p.y+nodeH}" stroke="#cfd3da"/>
+   <text x="${p.x+24}" y="${p.y+33}" text-anchor="middle" font-size="14">${fmt(c.es[i])}</text>
+   <text x="${p.x+95}" y="${p.y+24}" text-anchor="middle" font-weight="750" font-size="15">${esc(tasks[i].name)}</text>
+   <text x="${p.x+95}" y="${p.y+43}" text-anchor="middle" font-size="11" fill="#777">Activity</text>
+   <text x="${p.x+166}" y="${p.y+33}" text-anchor="middle" font-size="14">${fmt(c.ef[i])}</text>
+   <text x="${p.x+24}" y="${p.y+89}" text-anchor="middle" font-size="14">${fmt(c.ls[i])}</text>
+   <text x="${p.x+95}" y="${p.y+82}" text-anchor="middle" font-weight="700" font-size="14">${fmt(tasks[i].dur)}</text>
+   <text x="${p.x+95}" y="${p.y+101}" text-anchor="middle" font-size="11" fill="#777">Duration</text>
+   <text x="${p.x+166}" y="${p.y+89}" text-anchor="middle" font-size="14">${fmt(c.lf[i])}</text>
+   ${document.getElementById("showFloat").checked?`<text x="${p.x+95}" y="${p.y+129}" text-anchor="middle" font-size="12" font-weight="700" fill="${cr?"#ca5b57":"#45a56d"}">TF ${fmt(c.tf[i])}</text>`:""}
+   </g>`;
+ }
+
+ let special=`<g>
+ ${showStart?`<rect x="${pos.START.x}" y="${pos.START.y}" width="95" height="84" rx="7" fill="#f7f8fb" stroke="#333" stroke-width="2.5"/>
+ <text x="${pos.START.x+47.5}" y="${pos.START.y+50}" text-anchor="middle" font-size="16" font-weight="800">START</text>`:""}
+ ${showEnd?`<rect x="${pos.END.x}" y="${pos.END.y}" width="95" height="84" rx="7" fill="#f7f8fb" stroke="#333" stroke-width="2.5"/>
+ <text x="${pos.END.x+47.5}" y="${pos.END.y+50}" text-anchor="middle" font-size="16" font-weight="800">END</text>`:""}
+ </g>`;
+
+ document.getElementById("network").innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${edges}${special}${nodes}</svg>`;
 }
 function drawGantt(c){
  let scale=32,left=180,row=55,W=Math.max(1000,left+c.T*scale+80),H=65+tasks.length*row;let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`;
@@ -231,6 +484,65 @@ function saveSVG(id,name){let svg=document.querySelector("#"+id+" svg");if(!svg)
 function csvCell(x){x=String(x??"");return /[",\n]/.test(x)?`"${x.replaceAll('"','""')}"`:x}
 function exportCSV(){let lines=[["Activity","Duration","Predecessor","Cost"].join(",")];tasks.forEach(t=>lines.push([t.name,t.dur,t.pred,t.cost].map(csvCell).join(",")));let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"}));a.download="project.csv";a.click()}
 function parseCSVLine(line){let a=[],s="",q=false;for(let i=0;i<line.length;i++){let c=line[i];if(c=='"'&&q&&line[i+1]=='"'){s+='"';i++}else if(c=='"')q=!q;else if(c==","&&!q){a.push(s);s=""}else s+=c}a.push(s);return a}
-function importCSV(file){if(!file)return;let r=new FileReader();r.onload=()=>{let lines=r.result.split(/\r?\n/).filter(x=>x.trim()),h=parseCSVLine(lines.shift()).map(x=>x.trim().toLowerCase());let ix=(...ns)=>h.findIndex(x=>ns.includes(x));let ni=ix("activity","task name","task","name"),di=ix("duration","duration (days)"),pi=ix("predecessor","predecessors","depends on","relationships:lag","relationships","relationship:lag"),ci=ix("cost","cost ($)");tasks=lines.map(l=>{let a=parseCSVLine(l);return{name:a[ni]||"",dur:+a[di]||0,pred:pi>=0?(a[pi]||""):"",cost:ci>=0?(+a[ci]||0):0}});drawRows();render()};r.readAsText(file)}
+function importCSV(file){
+ if(!file)return;
+ let r=new FileReader();
+ r.onload=()=>{
+   try{
+     let lines=r.result.split(/\r?\n/).filter(x=>x.trim());
+     if(!lines.length) throw Error("CSV file is empty.");
+     let h=parseCSVLine(lines.shift()).map(x=>x.trim().toLowerCase().replace(/\s+/g," "));
+     let ix=(...ns)=>h.findIndex(x=>ns.includes(x));
+     let ni=ix("activity","task name","task","name","activity id","activity name"),
+         di=ix("duration","duration (days)","days"),
+         pi=ix("predecessor","predecessors","depends on","depends on activity"),
+         ri=ix("relationship","relationship type","relation","type"),
+         li=ix("lag","lag (days)","relationship lag"),
+         combo=ix("relationships:lag","relationship:lag","relationships"),
+         ci=ix("cost","cost ($)","budget");
+     if(ni<0) throw Error("Could not find an Activity/Task Name column.");
+     if(di<0) throw Error("Could not find a Duration column.");
+
+     // Merge repeated activity rows while preserving every predecessor relationship.
+     let map=new Map(),order=[];
+     for(let line of lines){
+       let a=parseCSVLine(line),name=(a[ni]||"").trim();
+       if(!name) continue;
+       let key=name.toLowerCase(),dur=Number(a[di]),cost=ci>=0?Number(a[ci]):0;
+       if(!map.has(key)){
+         map.set(key,{name,dur:Number.isFinite(dur)?dur:0,preds:[],cost:Number.isFinite(cost)?cost:0});
+         order.push(key);
+       }else{
+         let rec=map.get(key);
+         // Repeated activity is one activity. Keep the first duration, but use a later valid
+         // duration if the first one was blank/zero.
+         if((!rec.dur || rec.dur===0) && Number.isFinite(dur)) rec.dur=dur;
+         if((!rec.cost || rec.cost===0) && Number.isFinite(cost)) rec.cost=cost;
+       }
+       let rec=map.get(key);
+       let pred=pi>=0?(a[pi]||"").trim():"";
+       let rel=ri>=0?(a[ri]||"").trim().toUpperCase():"";
+       let lag=li>=0?Number(a[li]):0;
+       if(!Number.isFinite(lag))lag=0;
+
+       if(pred){
+         // A separate Relationship/Lag column takes precedence. Blank relationship = FS+0.
+         let rr=/^(FS|SS|FF|SF)$/i.test(rel)?rel:"FS";
+         let token=(rr==="FS" && lag===0) ? pred : pred+" "+rr+(lag?((lag>0?"+":"")+lag):"");
+         if(!rec.preds.some(x=>x.toLowerCase()===token.toLowerCase())) rec.preds.push(token);
+       }else if(combo>=0 && (a[combo]||"").trim()){
+         // Also accept an already-combined predecessor/relationship field.
+         let raw=(a[combo]||"").trim();
+         raw.split(",").map(x=>x.trim()).filter(Boolean).forEach(token=>{
+           if(!rec.preds.some(x=>x.toLowerCase()===token.toLowerCase()))rec.preds.push(token);
+         });
+       }
+     }
+     tasks=order.map(k=>{let x=map.get(k);return{name:x.name,dur:x.dur,pred:x.preds.join(", "),cost:x.cost}});
+     drawRows();render();
+   }catch(e){document.getElementById("err").textContent="CSV import error: "+e.message}
+ };
+ r.readAsText(file);
+}
 document.getElementById("projectTitle").addEventListener("input",render);loadSample();
 </script></body></html>
