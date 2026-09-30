@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Project CPM Planner</title>
+<style>
+:root{--blue:#5b7fda;--red:#ca5b57;--ink:#20242b;--line:#d9dce4;--bg:#f5f6f9;--card:#fff;--green:#45a56d}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:1700px;margin:auto;padding:24px}.top{display:flex;gap:18px;align-items:center;flex-wrap:wrap}.title{font-size:30px;font-weight:750;border:0;background:transparent;min-width:260px;color:#000;-webkit-text-fill-color:#000}
+.title::placeholder{color:#000;opacity:1}button{border:0;border-radius:6px;padding:12px 18px;background:var(--blue);color:white;font-size:16px;cursor:pointer}.danger{background:#b64d4d}
+.check{display:flex;align-items:center;gap:7px}.check input{width:19px;height:19px}.summary{margin-left:auto;font-weight:700;display:flex;gap:25px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:20px;padding:18px;box-shadow:0 1px 2px #00000008}
+.tablewrap{overflow:auto;max-height:540px}table{width:100%;border-collapse:collapse;min-width:900px}th,td{padding:10px;border-bottom:1px solid #e8e9ee;text-align:left}th{position:sticky;top:0;background:#f2f3f7;z-index:2}
+input.cell{width:100%;padding:10px;border:1px solid #d7dae2;border-radius:5px;font-size:15px}.id{width:55px}.dur{width:120px}.cost{width:150px}.del{background:transparent;color:#c64f4f;font-size:20px;padding:5px 12px}
+.head{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:700;margin-bottom:12px}.head button{margin-left:auto;padding:8px 13px}
+#network,#gantt,#costChart{width:100%;overflow:auto;border:1px solid #eceef2;background:white;min-height:170px}
+svg text{font-family:Inter,Segoe UI,Arial,sans-serif}.note{color:#747984;font-size:14px}.error{color:#b12d2d;font-weight:600;margin-top:10px}.tools{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.dashboard{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:12px;margin-top:18px}
+.metric{background:#fff;border:1px solid var(--line);border-radius:9px;padding:14px 16px}.metric .k{font-size:12px;color:#737986;text-transform:uppercase;letter-spacing:.04em}.metric .v{font-size:19px;font-weight:750;margin-top:5px}
+.warnbox{margin-top:12px;padding:10px 12px;border-radius:7px;background:#fff7e5;border:1px solid #efd394;color:#725514;display:none}
+.resultTable th,.resultTable td{text-align:center}.resultTable th:nth-child(2),.resultTable td:nth-child(2){text-align:left}.criticalRow{background:#fff1f0}.nearRow{background:#fff9e8}
+select.cell{background:#fff}.builder{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin:12px 0}.builder button{padding:9px 13px}.legend{display:flex;gap:16px;align-items:center;flex-wrap:wrap;font-size:13px;color:#666}.dot{width:11px;height:11px;border-radius:50%;display:inline-block;margin-right:5px}.dot.c{background:#ca5b57}.dot.n{background:#d6a43b}.dot.o{background:#5b7fda}
+@media(max-width:850px){.summary{margin-left:0;width:100%}.dashboard{grid-template-columns:1fr 1fr}.builder{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body><main>
+<div class="top">
+<input id="projectTitle" class="title" value="Software Project">
+<button onclick="addTask()">＋ Add Task</button>
+<button class="danger" onclick="resetProject()">↻ Reset / New Project</button>
+<label class="check"><input id="showFloat" type="checkbox" checked onchange="render()"> Show Float</label>
+<label class="check"><input id="showCost" type="checkbox" checked onchange="render()"> Show Cost</label>
+<label class="check"><input id="showRel" type="checkbox" onchange="render()"> Show Logical Relationships</label>
+<div class="summary"><span id="duration">Project Duration: —</span><span id="totalCost">Total Cost: —</span></div>
+</div>
+<div class="dashboard">
+ <div class="metric"><div class="k">Project Duration</div><div class="v" id="mDuration">—</div></div>
+ <div class="metric"><div class="k">Critical Path(s)</div><div class="v" id="mCritical">—</div></div>
+ <div class="metric"><div class="k">Critical Activities</div><div class="v" id="mCritCount">—</div></div>
+ <div class="metric"><div class="k">Near-Critical Threshold</div><div class="v"><input id="nearThreshold" type="number" min="0" step="0.5" value="2" style="width:70px;padding:5px" onchange="render()"> days</div></div>
+</div>
+
+<div class="card">
+<div class="tablewrap"><table><thead><tr><th>ID</th><th>Task Name</th><th>Duration (days)</th><th>Predecessors</th><th class="costCol">Cost ($)</th><th>Actions</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div id="err" class="error"></div>
+<div class="tools"><button onclick="document.getElementById('csv').click()">Import CSV</button><input id="csv" type="file" accept=".csv" hidden onchange="importCSV(this.files[0])"><button onclick="exportCSV()">Export CSV</button><button onclick="loadSample()">Load Sample</button><button onclick="window.print()">Print / Save PDF Report</button></div>
+<div class="builder">
+<select id="bTask" class="cell"></select>
+<select id="bPred" class="cell"></select>
+<div style="display:flex;gap:6px"><select id="bRel" class="cell"><option>FS</option><option>SS</option><option>FF</option><option>SF</option></select><input id="bLag" class="cell" type="number" step="any" value="0" title="Lag"></div>
+<button onclick="addRelationship()">Add Relationship</button>
+</div>
+<p class="note">Relationship Builder: choose a task, its predecessor, relationship type and lag. The predecessor field is filled automatically.</p>
+<p class="note">Predecessor examples: <b>A</b>, <b>A FS+2</b>, <b>A SS</b>, <b>B SS+1, E</b>, <b>C FF+3</b>, <b>C SF+3</b>. Plain predecessors default to FS+0.</p>
+</div>
+
+<div class="card">
+<div class="head">▤ CPM Calculation Results <span class="note">(click a row for calculation explanation)</span></div>
+<div class="legend"><span><i class="dot c"></i>Critical</span><span><i class="dot n"></i>Near-critical</span><span><i class="dot o"></i>Noncritical</span></div>
+<div id="logicWarnings" class="warnbox"></div>
+<div class="tablewrap" style="max-height:420px"><table class="resultTable"><thead><tr><th>ID</th><th>Activity</th><th>Dur.</th><th>ES</th><th>EF</th><th>LS</th><th>LF</th><th>TF</th><th>FF</th><th>IntF</th><th>IndF</th><th>Status</th></tr></thead><tbody id="resultRows"></tbody></table></div>
+<div id="explain" class="note" style="margin-top:12px"></div>
+</div>
+<div class="card"><div class="head">▷ <span id="networkTitle">Network Diagram (Activity on Node)</span><span class="note">(critical activities in red)</span><button onclick="saveSVG('network','network.svg')">Save as SVG</button></div><div id="network"></div></div>
+<div class="card"><div class="head">▣ <span id="ganttTitle">Gantt Chart</span><button onclick="saveSVG('gantt','gantt.svg')">Save as SVG</button></div><div id="gantt"></div></div>
+<div class="card" id="costCard"><div class="head">$ <span id="costTitle">Cumulative Cost</span><button onclick="saveSVG('costChart','cumulative-cost.svg')">Save as SVG</button></div><div id="costChart"></div></div>
+</main>
+<script>
+let tasks=[];
+const sample=[
+{name:"Research",dur:5,pred:"",cost:5000},{name:"System Design",dur:10,pred:"Research",cost:15000},
+{name:"UI/UX Design",dur:7,pred:"Research",cost:4000},{name:"Development",dur:20,pred:"System Design",cost:2000},
+{name:"Code Review",dur:4,pred:"UI/UX Design",cost:3000},{name:"Testing (QA)",dur:15,pred:"UI/UX Design",cost:2500},
+{name:"Deployment",dur:5,pred:"Development, Code Review",cost:4000},{name:"Maintenance",dur:10,pred:"Testing (QA), Deployment",cost:2000}];
+function loadSample(){tasks=structuredClone(sample);drawRows();render()}
+function resetProject(){
+  if(!confirm("Clear all project and task data?")) return;
+  tasks=[{name:"",dur:"",pred:"",cost:""}];
+  document.getElementById("projectTitle").value="";
+  document.getElementById("projectTitle").placeholder="Enter Project Name";
+  drawRows();
+  render();
+  setTimeout(()=>{
+    document.getElementById("projectTitle").focus();
+  },0);
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function drawRows(){const b=document.getElementById("rows");b.innerHTML=tasks.map((t,i)=>`<tr><td>${i+1}</td>
+<td><input class="cell" value="${esc(t.name)}" oninput="edit(${i},'name',this.value)"></td>
+<td><input class="cell dur" type="number" min="0" step="any" value="${t.dur}" oninput="edit(${i},'dur',this.value)"></td>
+<td><input class="cell" value="${esc(t.pred)}" placeholder="e.g., Design FS+2" oninput="edit(${i},'pred',this.value)"></td>
+<td class="costCol"><input class="cell cost" type="number" min="0" step="any" value="${t.cost||0}" oninput="edit(${i},'cost',this.value)"></td>
+<td><button class="del" onclick="removeTask(${i})">⌫</button></td></tr>`).join("");toggleCostCols()}
+function addTask(){tasks.push({name:"Task "+(tasks.length+1),dur:1,pred:"",cost:0});drawRows();render()}
+function removeTask(i){tasks.splice(i,1);drawRows();render()}
+function edit(i,k,v){tasks[i][k]=(k==="dur"||k==="cost")?Math.max(0,+v||0):v;render()}
+function toggleCostCols(){let sh=document.getElementById("showCost").checked;document.querySelectorAll(".costCol").forEach(x=>x.style.display=sh?"table-cell":"none");document.getElementById("costCard").style.display=sh?"block":"none"}
+
+function parsePred(text,names){
+ let out=[]; if(!text.trim()) return out;
+ // split only at commas that precede a recognizable task expression
+ let parts=text.split(",").map(x=>x.trim()).filter(Boolean);
+ for(let raw of parts){
+   let rel="FS",lag=0,name=raw;
+   let m=raw.match(/^(.*?)(?:\s+(FS|SS|FF|SF)(?:\s*([+-])\s*(\d+(?:\.\d+)?))?)$/i);
+   if(m){name=m[1].trim();rel=m[2].toUpperCase();lag=m[4]?Number(m[4])*(m[3]==="-"?-1:1):0}
+   let j=names.findIndex(x=>x.toLowerCase()===name.toLowerCase());
+   if(j<0) throw Error(`Unknown predecessor "${name}"`);
+   out.push({j,rel,lag,label:`${rel}${lag?((lag>0?"+":"")+lag):""}`});
+ } return out;
+}
+function calc(){
+ const n=tasks.length,names=tasks.map(t=>t.name.trim()); if(new Set(names.map(x=>x.toLowerCase())).size<n)throw Error("Task names must be unique.");
+ if(names.some(x=>!x))throw Error("Every task needs a name.");
+ let preds=tasks.map(t=>parsePred(t.pred,names)),succ=Array.from({length:n},()=>[]);
+ preds.forEach((ps,i)=>ps.forEach(p=>succ[p.j].push({i,...p})));
+ // generalized precedence constraints represented as S_i >= S_j + weight
+ let indeg=preds.map(x=>x.length),q=[];indeg.forEach((d,i)=>{if(!d)q.push(i)});let order=[];
+ while(q.length){let u=q.shift();order.push(u);for(let e of succ[u])if(--indeg[e.i]===0)q.push(e.i)}
+ if(order.length<n)throw Error("The predecessor logic contains a cycle.");
+ let es=Array(n).fill(0);
+ for(let i of order) for(let p of preds[i]){
+   let dp=tasks[p.j].dur,di=tasks[i].dur,w=0;
+   if(p.rel==="FS")w=dp+p.lag; if(p.rel==="SS")w=p.lag; if(p.rel==="FF")w=dp+p.lag-di; if(p.rel==="SF")w=p.lag-di;
+   es[i]=Math.max(es[i],es[p.j]+w);
+ }
+ let ef=es.map((x,i)=>x+tasks[i].dur),T=Math.max(0,...ef),ls=Array(n).fill(Infinity);
+ // constrain every activity finish <= project finish, then propagate precedence backwards
+ for(let i=0;i<n;i++)ls[i]=T-tasks[i].dur;
+ for(let oi=order.length-1;oi>=0;oi--){let u=order[oi];for(let e of succ[u]){
+   let dp=tasks[u].dur,di=tasks[e.i].dur,w=0;
+   if(e.rel==="FS")w=dp+e.lag;if(e.rel==="SS")w=e.lag;if(e.rel==="FF")w=dp+e.lag-di;if(e.rel==="SF")w=e.lag-di;
+   ls[u]=Math.min(ls[u],ls[e.i]-w);
+ }}
+ let lf=ls.map((x,i)=>x+tasks[i].dur),tf=ls.map((x,i)=>x-es[i]),crit=tf.map(x=>Math.abs(x)<1e-7);
+ return {preds,succ,order,es,ef,ls,lf,tf,crit,T};
+}
+
+function updateBuilder(){
+ const names=tasks.map((t,i)=>({i,n:t.name.trim()||("Task "+(i+1))}));
+ const opts=names.map(x=>`<option value="${x.i}">${x.i+1}. ${esc(x.n)}</option>`).join("");
+ document.getElementById("bTask").innerHTML=opts;document.getElementById("bPred").innerHTML=opts;
+ if(names.length>1)document.getElementById("bTask").value=1;
+}
+function addRelationship(){
+ let ti=+document.getElementById("bTask").value,pi=+document.getElementById("bPred").value;
+ if(!tasks[ti]||!tasks[pi])return;if(ti===pi){alert("A task cannot be its own predecessor.");return}
+ let pn=tasks[pi].name.trim();if(!pn){alert("Give the predecessor task a name first.");return}
+ let rel=document.getElementById("bRel").value,lag=+document.getElementById("bLag").value||0;
+ let token=pn+" "+rel+(lag?(lag>0?"+":"")+lag:"");
+ tasks[ti].pred=tasks[ti].pred.trim()?tasks[ti].pred+", "+token:token;drawRows();render()
+}
+function analyzeExtra(c){
+ let n=tasks.length,ff=Array(n).fill(0),indf=Array(n).fill(0);
+ for(let i=0;i<n;i++){
+   let bounds=[];
+   for(let e of c.succ[i]){
+     let dp=tasks[i].dur,di=tasks[e.i].dur,w=0;
+     if(e.rel==="FS")w=dp+e.lag;if(e.rel==="SS")w=e.lag;if(e.rel==="FF")w=dp+e.lag-di;if(e.rel==="SF")w=e.lag-di;
+     bounds.push(c.es[e.i]-(c.es[i]+w));
+   }
+   ff[i]=bounds.length?Math.max(0,Math.min(...bounds)):Math.max(0,c.T-c.ef[i]);
+   indf[i]=Math.max(0,ff[i]-Math.max(0,c.tf[i]-ff[i]));
+ }
+ let intf=c.tf.map((x,i)=>Math.max(0,x-ff[i]));
+ return {ff,indf,intf};
+}
+function criticalPaths(c){
+ let starts=[];for(let i=0;i<tasks.length;i++)if(c.crit[i]&&!c.preds[i].some(p=>c.crit[p.j]))starts.push(i);
+ let paths=[];
+ function dfs(u,path){
+   let next=c.succ[u].filter(e=>c.crit[e.i] && Math.abs(c.es[e.i]-(c.ef[u]+(e.rel==="FS"?e.lag:0)))<1e-7 && e.rel==="FS");
+   if(!next.length){paths.push(path.concat(u));return}
+   next.forEach(e=>dfs(e.i,path.concat(u)));
+ }
+ starts.forEach(s=>dfs(s,[]));
+ if(!paths.length){let cp=c.order.filter(i=>c.crit[i]);if(cp.length)paths=[cp]}
+ return paths.slice(0,8);
+}
+function renderResults(c){
+ let x=analyzeExtra(c),thr=Math.max(0,+document.getElementById("nearThreshold").value||0);
+ let rows=tasks.map((t,i)=>{let near=!c.crit[i]&&c.tf[i]<=thr,st=c.crit[i]?"Critical":near?"Near-critical":"Noncritical";
+ return `<tr class="${c.crit[i]?"criticalRow":near?"nearRow":""}" onclick="explainTask(${i})"><td>${i+1}</td><td>${esc(t.name)}</td><td>${fmt(t.dur)}</td><td>${fmt(c.es[i])}</td><td>${fmt(c.ef[i])}</td><td>${fmt(c.ls[i])}</td><td>${fmt(c.lf[i])}</td><td>${fmt(c.tf[i])}</td><td>${fmt(x.ff[i])}</td><td>${fmt(x.intf[i])}</td><td>${fmt(x.indf[i])}</td><td>${st}</td></tr>`}).join("");
+ document.getElementById("resultRows").innerHTML=rows;
+ let paths=criticalPaths(c);document.getElementById("mDuration").textContent=fmt(c.T)+" days";document.getElementById("mCritCount").textContent=c.crit.filter(Boolean).length;
+ document.getElementById("mCritical").textContent=paths.length?paths.map(p=>p.map(i=>tasks[i].name).join(" → ")).join(" | "):"—";
+ let warnings=[];let roots=c.preds.map((p,i)=>!p.length?i:-1).filter(i=>i>=0),ends=c.succ.map((s,i)=>!s.length?i:-1).filter(i=>i>=0);
+ if(roots.length>1)warnings.push(`Multiple starting activities: ${roots.map(i=>tasks[i].name).join(", ")}.`);
+ if(ends.length>1)warnings.push(`Multiple terminal activities: ${ends.map(i=>tasks[i].name).join(", ")}.`);
+ let box=document.getElementById("logicWarnings");box.style.display=warnings.length?"block":"none";box.textContent=warnings.join(" ");
+ window._lastCalc=c;window._lastExtra=x;
+}
+function explainTask(i){
+ let c=window._lastCalc,x=window._lastExtra;if(!c)return;let t=tasks[i],ps=c.preds[i].map(p=>tasks[p.j].name+" "+p.label).join(", ")||"none";
+ let ss=c.succ[i].map(e=>tasks[e.i].name+" "+e.label).join(", ")||"none";
+ document.getElementById("explain").innerHTML=`<b>${esc(t.name)}</b>: predecessors = ${esc(ps)}; successors = ${esc(ss)}. Early schedule: ES ${fmt(c.es[i])} → EF ${fmt(c.ef[i])}. Late schedule: LS ${fmt(c.ls[i])} → LF ${fmt(c.lf[i])}. Total Float = ${fmt(c.tf[i])}; Free Float = ${fmt(x.ff[i])}; Interfering Float = ${fmt(x.intf[i])}; Independent Float = ${fmt(x.indf[i])}.`;
+}
+
+function render(){
+ toggleCostCols();let c;try{c=calc();document.getElementById("err").textContent=""}catch(e){document.getElementById("err").textContent=e.message;["network","gantt","costChart","resultRows"].forEach(id=>document.getElementById(id).innerHTML="");document.getElementById("mDuration").textContent="—";document.getElementById("mCritical").textContent="—";document.getElementById("mCritCount").textContent="—";return}
+ let title=document.getElementById("projectTitle").value||"Project";document.getElementById("networkTitle").textContent=title+" - Network Diagram (Activity on Node)";document.getElementById("ganttTitle").textContent=title+" - Gantt Chart";document.getElementById("costTitle").textContent=title+" - Cumulative Cost";
+ document.getElementById("duration").textContent=`Project Duration: ${fmt(c.T)} days`;
+ let total=tasks.reduce((a,t)=>a+(+t.cost||0),0);document.getElementById("totalCost").textContent=`Total Cost: $${total.toLocaleString()}`;
+ updateBuilder();renderResults(c);drawNetwork(c);drawGantt(c);if(document.getElementById("showCost").checked)drawCost(c)
+}
+function fmt(x){return Math.abs(x-Math.round(x))<1e-8?Math.round(x):Math.round(x*100)/100}
+function drawNetwork(c){
+ const n=tasks.length;if(!n){document.getElementById("network").innerHTML="";return}
+ let level=Array(n).fill(0);for(let i of c.order)for(let p of c.preds[i])level[i]=Math.max(level[i],level[p.j]+1);
+ let groups={};level.forEach((l,i)=>(groups[l]??=[]).push(i));let maxL=Math.max(...level),W=Math.max(1000,(maxL+1)*260),maxRows=Math.max(...Object.values(groups).map(x=>x.length)),H=Math.max(260,maxRows*155+70),pos={};
+ for(let l=0;l<=maxL;l++){let g=groups[l]||[];g.forEach((i,r)=>pos[i]={x:40+l*250,y:35+(r+1)*(H-80)/(g.length+1)-55})}
+ let defs=`<defs><marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#555"/></marker><marker id="arrc" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#ca5b57"/></marker></defs>`;
+ let edges="";for(let i=0;i<n;i++)for(let p of c.preds[i]){let a=pos[p.j],b=pos[i],critical=c.crit[p.j]&&c.crit[i];let col=critical?"#ca5b57":"#555";edges+=`<line x1="${a.x+190}" y1="${a.y+52}" x2="${b.x}" y2="${b.y+52}" stroke="${col}" stroke-width="${critical?3:2}" marker-end="url(#${critical?"arrc":"arr"})"/>`;if(document.getElementById("showRel").checked)edges+=`<text x="${(a.x+190+b.x)/2}" y="${(a.y+b.y)/2+45}" font-size="13" fill="#555">${p.label}</text>`}
+ let nodes="";for(let i=0;i<n;i++){let p=pos[i],cr=c.crit[i],stroke=cr?"#ca5b57":"#5b7fda";nodes+=`<g><rect x="${p.x}" y="${p.y}" width="190" height="105" rx="6" fill="#fff" stroke="${stroke}" stroke-width="3"/><text x="${p.x+95}" y="${p.y+21}" text-anchor="middle" font-weight="700" font-size="15">${esc(tasks[i].name)}</text><text x="${p.x+95}" y="${p.y+40}" text-anchor="middle" font-size="13">Duration: ${fmt(tasks[i].dur)}</text><text x="${p.x+12}" y="${p.y+61}" font-size="13">ES: ${fmt(c.es[i])}</text><text x="${p.x+112}" y="${p.y+61}" font-size="13">EF: ${fmt(c.ef[i])}</text><text x="${p.x+12}" y="${p.y+81}" font-size="13">LS: ${fmt(c.ls[i])}</text><text x="${p.x+112}" y="${p.y+81}" font-size="13">LF: ${fmt(c.lf[i])}</text>${document.getElementById("showFloat").checked?`<text x="${p.x+95}" y="${p.y+99}" text-anchor="middle" font-size="13" fill="${cr?"#ca5b57":"#45a56d"}">Float: ${fmt(c.tf[i])}</text>`:""}</g>`}
+ document.getElementById("network").innerHTML=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${edges}${nodes}</svg>`
+}
+function drawGantt(c){
+ let scale=32,left=180,row=55,W=Math.max(1000,left+c.T*scale+80),H=65+tasks.length*row;let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">`;
+ for(let d=0;d<=Math.ceil(c.T);d++){let x=left+d*scale;s+=`<line x1="${x}" y1="35" x2="${x}" y2="${H}" stroke="#e5e7ec"/><text x="${x}" y="27" text-anchor="middle" font-size="12">${d}</text>`}
+ tasks.forEach((t,i)=>{let y=45+i*row;s+=`<text x="12" y="${y+23}" font-size="14" font-weight="600">${esc(t.name)}</text>`;if(document.getElementById("showFloat").checked&&c.tf[i]>0)s+=`<rect x="${left+c.es[i]*scale}" y="${y+7}" width="${(t.dur+c.tf[i])*scale}" height="28" rx="3" fill="#dfe7f8"/>`;s+=`<rect x="${left+c.es[i]*scale}" y="${y+7}" width="${Math.max(2,t.dur*scale)}" height="28" rx="3" fill="${c.crit[i]?"#ca5b57":"#5b7fda"}"/><text x="${left+(c.es[i]+t.dur/2)*scale}" y="${y+26}" text-anchor="middle" font-size="12" fill="white" font-weight="700">${fmt(t.dur)}d</text>`});s+="</svg>";document.getElementById("gantt").innerHTML=s
+}
+function drawCost(c){
+ let W=Math.max(900,c.T*20+120),H=350,pad={l:70,r:30,t:25,b:45},total=tasks.reduce((a,t)=>a+(+t.cost||0),0),days=Math.ceil(c.T),vals=[];
+ for(let d=0;d<=days;d++){let sum=0;tasks.forEach((t,i)=>{let cost=+t.cost||0;if(t.dur<=0){if(d>=c.es[i])sum+=cost}else{let frac=Math.max(0,Math.min(1,(d-c.es[i])/t.dur));sum+=cost*frac}});vals.push(sum)}
+ let x=d=>pad.l+(W-pad.l-pad.r)*(d/Math.max(1,days)),y=v=>H-pad.b-(H-pad.t-pad.b)*(v/Math.max(1,total)),pts=vals.map((v,d)=>`${x(d)},${y(v)}`).join(" ");
+ let s=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><line x1="${pad.l}" y1="${H-pad.b}" x2="${W-pad.r}" y2="${H-pad.b}" stroke="#777"/><line x1="${pad.l}" y1="${pad.t}" x2="${pad.l}" y2="${H-pad.b}" stroke="#777"/>`;
+ for(let k=0;k<=5;k++){let v=total*k/5,yy=y(v);s+=`<line x1="${pad.l}" y1="${yy}" x2="${W-pad.r}" y2="${yy}" stroke="#e4e6eb"/><text x="${pad.l-10}" y="${yy+4}" text-anchor="end" font-size="12">$${Math.round(v/1000)}k</text>`}
+ s+=`<polyline fill="none" stroke="#5b7fda" stroke-width="3" points="${pts}"/>`;vals.forEach((v,d)=>s+=`<circle cx="${x(d)}" cy="${y(v)}" r="3" fill="#5b7fda"/>`);s+=`<text x="${W/2}" y="${H-10}" text-anchor="middle">Day</text><text transform="translate(18 ${H/2}) rotate(-90)" text-anchor="middle">Cumulative Cost ($)</text></svg>`;document.getElementById("costChart").innerHTML=s
+}
+function saveSVG(id,name){let svg=document.querySelector("#"+id+" svg");if(!svg)return;let blob=new Blob([svg.outerHTML],{type:"image/svg+xml"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+function csvCell(x){x=String(x??"");return /[",\n]/.test(x)?`"${x.replaceAll('"','""')}"`:x}
+function exportCSV(){let lines=[["Activity","Duration","Predecessor","Cost"].join(",")];tasks.forEach(t=>lines.push([t.name,t.dur,t.pred,t.cost].map(csvCell).join(",")));let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([lines.join("\n")],{type:"text/csv"}));a.download="project.csv";a.click()}
+function parseCSVLine(line){let a=[],s="",q=false;for(let i=0;i<line.length;i++){let c=line[i];if(c=='"'&&q&&line[i+1]=='"'){s+='"';i++}else if(c=='"')q=!q;else if(c==","&&!q){a.push(s);s=""}else s+=c}a.push(s);return a}
+function importCSV(file){if(!file)return;let r=new FileReader();r.onload=()=>{let lines=r.result.split(/\r?\n/).filter(x=>x.trim()),h=parseCSVLine(lines.shift()).map(x=>x.trim().toLowerCase());let ix=(...ns)=>h.findIndex(x=>ns.includes(x));let ni=ix("activity","task name","task","name"),di=ix("duration","duration (days)"),pi=ix("predecessor","predecessors","depends on","relationships:lag","relationships","relationship:lag"),ci=ix("cost","cost ($)");tasks=lines.map(l=>{let a=parseCSVLine(l);return{name:a[ni]||"",dur:+a[di]||0,pred:pi>=0?(a[pi]||""):"",cost:ci>=0?(+a[ci]||0):0}});drawRows();render()};r.readAsText(file)}
+document.getElementById("projectTitle").addEventListener("input",render);loadSample();
+</script></body></html>
