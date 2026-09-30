@@ -10,7 +10,7 @@ The application runs entirely in the browser and does not require installation.
 
 ## 🌐 Live Demo
 
-👉 **[Open CPM Project Planner Pro](https://musadsaiyed.github.io/CPM-Project-Planner/)**
+👉 **[Open CPM Project Planner Pro]**
 
 ---
 
